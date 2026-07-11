@@ -1,0 +1,32 @@
+# Build output
+build/
+
+# Compiled shaders (SPIR-V)
+shaders/spv/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temp / logs
+*.log
+build_out.txt
+do_build.bat
+
+# 옛 중복 복사본 (자체 build/replays 포함, 수백 MB) — 저장소에서 제외
+OProj/
+
+# Large binary assets
+Other/
+maps/Textures/
+maps/InfernoWorld/
+Aim.pdf

@@ -1,0 +1,423 @@
+================================================================================
+  PROJECT_CONTEXT.txt
+  Vulkan C++ 3D Renderer — Research Project Overview for Claude Code
+================================================================================
+
+This file exists to give Claude Code full context about this project before
+touching any code. Read this entirely before making any decisions.
+
+--------------------------------------------------------------------------------
+0. QUICK SUMMARY
+--------------------------------------------------------------------------------
+
+This is a high-school independent research project (과제연구) building a
+custom 3D renderer from scratch in C++ using the Vulkan API, then benchmarking
+it against Unity's built-in render pipeline under identical scene conditions.
+
+The renderer implements 8 GPU optimization techniques that can be toggled
+on/off at runtime, so each technique's performance contribution can be measured
+independently and in combination.
+
+Research period: Late March 2026 – Mid July 2026
+Team: 3 members (윤은찬, 이상윤, 강연우)
+
+--------------------------------------------------------------------------------
+1. LANGUAGE / BINDING CHANGE NOTE  ⚠️  IMPORTANT
+--------------------------------------------------------------------------------
+
+The original proposal document lists C# with Silk.NET/Vulkan.NET bindings.
+THIS HAS CHANGED. The project is now implemented in:
+
+  Language  : C++ (C++17 or later)
+  API       : Vulkan (via the official Vulkan SDK / vulkan.h)
+  No .NET, no Silk.NET, no C# anywhere.
+
+When writing or suggesting code, always use C++. Do NOT generate C# code.
+
+Likely supporting libraries (confirm with team before adding dependencies):
+  - Vulkan SDK          : core Vulkan API
+  - GLFW or SDL2        : window creation & input
+  - GLM                 : math (vectors, matrices)
+  - stb_image           : texture loading
+  - tinyobjloader       : OBJ mesh loading (or assimp for broader format support)
+  - Dear ImGui          : optional debug/toggle UI overlay
+  - spdlog              : optional logging
+
+--------------------------------------------------------------------------------
+2. RESEARCH GOAL
+--------------------------------------------------------------------------------
+
+Primary question:
+  How much does each GPU rendering optimization technique (and their
+  combinations) improve frame performance in a custom Vulkan renderer?
+
+Secondary question:
+  How does the custom Vulkan renderer's performance compare to Unity's
+  built-in render pipeline under equivalent scene conditions?
+
+The expected output is quantitative benchmark data (FPS, frame time, draw call
+count, GPU/CPU usage, memory) published in a formal research report.
+
+--------------------------------------------------------------------------------
+3. RENDERER ARCHITECTURE OVERVIEW
+--------------------------------------------------------------------------------
+
+The renderer is built from scratch. There is NO game engine underneath it.
+Every system listed below must be implemented manually.
+
+3.1 Core Vulkan Initialization (Stage 1 of implementation)
+  - VkInstance, physical/logical device selection
+  - Swapchain creation and management
+  - Render passes and framebuffers
+  - Command pool / command buffer recording
+  - Synchronization (semaphores, fences)
+  - Validation layers enabled in debug builds
+
+3.2 Scene & Transform System
+  - World coordinate system + local coordinate system per object
+  - Transform component: position, rotation, scale → 4×4 model matrix
+  - Scene graph or flat object list (TBD by team)
+
+3.3 Camera System
+  - View matrix (manual calculation, not library shortcut)
+  - Projection matrix (perspective): FOV, near/far clip plane, aspect ratio
+  - All parameters must be runtime-adjustable
+
+3.4 Rendering Pipeline (Stage 2 of implementation)
+
+  3.4.1 Lighting
+    - Directional Light  : uniform direction across entire scene (like sunlight)
+    - Point Light        : positional, emits in all directions (like a bulb)
+    - Shading model      : PBR (Physically Based Rendering)
+        * Parameters     : Metallic (0–1), Roughness (0–1)
+        * Fresnel effect : reflectance increases at grazing angles
+        * Materials      : metals, glass, plastics expressible
+    - Fallback / comparison model : Blinn-Phong (Ambient + Diffuse + Specular)
+      [Blinn-Phong kept as reference; PBR is the primary model]
+    - IBL (Image-Based Lighting) : implement if schedule allows
+
+  3.4.2 Shadows
+    - Primary method : Shadow Mapping
+        * Render scene from light's POV → store depth in shadow map texture
+        * Camera pass compares fragment depth against shadow map
+        * PCF (Percentage Closer Filtering) applied to soften shadow edges
+    - Optional        : Ray-traced shadows (hardware-dependent, RTX 5090 available)
+
+  3.4.3 Reflections / Environment Mapping
+    - Cube Map (6-face environment texture)
+    - Reflect vector = reflect(view_dir, normal)
+    - Sample cube map at reflect vector → reflection color
+    - Apply to metallic cube and sphere objects in scene
+    - Stretch goal: roughness-based blurred reflections via PBR integration
+
+  3.4.4 Transparency
+    - Semi-transparent glass objects
+    - Fresnel-modulated reflectance by view angle
+    - Transmission (light passes through object)
+
+  3.4.5 Anti-Aliasing
+    - Candidates: MSAA (multi-sample, edge quality) or FXAA (post-process, fast)
+    - Final choice made after performance/quality comparison
+    - Note: MSAA has compatibility issues with Deferred Rendering (see §3.5.5)
+
+  3.4.6 Optional / Stretch Goals
+    - Particle system (smoke, fire) — physics handled in shader
+    - Full IBL pipeline
+
+3.5 Optimization Modules — THE CORE EXPERIMENT (Stage 3)
+
+Each technique is implemented as an INDEPENDENT MODULE with a boolean toggle
+flag. All 8 can be switched on/off at runtime without restarting.
+This toggle system is central to the experiment design.
+
+  ┌─────────────────────┬──────────────────────────────────────────────────────┐
+  │ Module              │ Description                                          │
+  ├─────────────────────┼──────────────────────────────────────────────────────┤
+  │ Frustum Culling     │ CPU-side rejection of objects outside camera frustum │
+  │                     │ before issuing any draw calls.                       │
+  │                     │ Effect amplifies with object count & narrow FOV.     │
+  ├─────────────────────┼──────────────────────────────────────────────────────┤
+  │ Occlusion Culling   │ GPU Occlusion Query — skip rendering objects fully   │
+  │                     │ hidden behind others. Has query latency overhead;    │
+  │                     │ can be net-negative in open scenes.                  │
+  ├─────────────────────┼──────────────────────────────────────────────────────┤
+  │ LOD                 │ Level of Detail — swap to lower-polygon mesh as      │
+  │                     │ camera distance increases. Reduces vertex shader     │
+  │                     │ load. Negligible benefit for close-up scenes.        │
+  ├─────────────────────┼──────────────────────────────────────────────────────┤
+  │ Instanced Rendering │ Merge repeated identical-mesh draw calls into one    │
+  │                     │ instanced draw call. Primarily reduces CPU overhead. │
+  │                     │ Hypothesis: meaningful above ~100 repeated objects.  │
+  ├─────────────────────┼──────────────────────────────────────────────────────┤
+  │ Deferred Rendering  │ Two-pass pipeline:                                   │
+  │                     │   Pass 1 — Geometry Pass: write pos/normal/albedo    │
+  │                     │            into G-Buffer (MRT).                      │
+  │                     │   Pass 2 — Lighting Pass: shade only visible pixels  │
+  │                     │            using G-Buffer data.                      │
+  │                     │ Scales well with many lights. G-Buffer creation cost │
+  │                     │ hurts with few lights (< ~4). MSAA incompatible.     │
+  ├─────────────────────┼──────────────────────────────────────────────────────┤
+  │ Mipmapping          │ Pre-generate downsampled texture LODs. Improves GPU  │
+  │                     │ cache hit rate and reduces texture aliasing on        │
+  │                     │ distant objects. Best with high-res textures.        │
+  ├─────────────────────┼──────────────────────────────────────────────────────┤
+  │ Early-Z Rejection   │ Run depth test BEFORE fragment shader. Discards      │
+  │                     │ occluded fragments early. Maximized with             │
+  │                     │ Front-to-Back draw order sorting.                    │
+  │                     │ Sorting overhead may appear at very high object count.│
+  ├─────────────────────┼──────────────────────────────────────────────────────┤
+  │ UBO Optimization    │ Pack constant/uniform shader data into UBOs          │
+  │                     │ (Uniform Buffer Objects) efficiently to minimize     │
+  │                     │ CPU→GPU transfer calls. Expected to reduce frame     │
+  │                     │ time variance (jitter) more than average FPS.        │
+  └─────────────────────┴──────────────────────────────────────────────────────┘
+
+--------------------------------------------------------------------------------
+4. EXPERIMENT DESIGN
+--------------------------------------------------------------------------------
+
+4.1 Test Scenes
+
+  Scene A — Debug / Feature Verification Scene
+    Purpose   : Confirm individual rendering features work correctly
+    Contents  : Grid floor + simple geometric primitives
+    Use       : Lighting, shadow, reflection correctness checks
+
+  Scene B — Performance Benchmark Scene (main experiment scene)
+    Purpose   : Measure optimization technique impact
+    Contents  : Terrain + distant objects (natural open world)
+    Techniques tested: Frustum Culling, LOD, Shadow Mapping effectiveness
+
+  Object types in scenes:
+    - Cube, hollow cube, sphere
+    - Multiple repeated instances (for Instanced Rendering test)
+    - Reflective metallic cube & sphere (for Environment Mapping)
+    - Semi-transparent glass object (for Fresnel/Transmission)
+    - High-polygon mesh object (for LOD test)
+
+  Load levels (per scene): LOW / MEDIUM / HIGH
+    Variables controlled:
+      - Number of objects in scene
+      - Number of light sources
+      - Shadow casting range
+
+4.2 Unity Comparison
+  !! NOT IN SCOPE !!
+  Unity-side scene recreation and benchmarking will NOT be performed.
+  The research focuses solely on the custom Vulkan renderer's optimization
+  technique comparisons. Unity comparison content in the proposal document
+  can be treated as background motivation only.
+
+4.3 Metrics Collected
+  - FPS (frames per second)
+  - Frame Time (ms) — including variance/jitter
+  - GPU usage (%)
+  - CPU usage (%)
+  - Draw call count
+  - Memory usage (MB)
+
+4.4 Measurement Tools
+  - Vulkan Timestamp Queries   : in-engine GPU timing
+  - RenderDoc                  : frame capture & pipeline inspection
+  - NVIDIA Nsight Graphics     : detailed GPU profiling
+
+4.5 Procedure per Experiment Run
+  1. Set scene load level
+  2. Set optimization module toggle combination (e.g., only Frustum ON)
+  3. Run for fixed duration, record repeated samples
+  4. Average the samples → one data point
+  5. Repeat for all relevant toggle combinations
+
+--------------------------------------------------------------------------------
+5. HYPOTHESES (per optimization technique)
+--------------------------------------------------------------------------------
+
+Frustum Culling
+  H: FPS improvement scales with object count and narrows with wider FOV.
+     Low-load scenes see minimal gain; high-density scenes see large CPU drop.
+
+Occlusion Culling
+  H: Only meaningful in enclosed/dense scenes. In open worlds, GPU query
+     latency exceeds the savings → net performance loss possible.
+
+LOD
+  H: GPU usage drops with many distant objects. Near-only scenes: near-zero
+     benefit.
+
+Instanced Rendering
+  H: Draw call count drops to 1/N above ~100 repeated objects. CPU usage
+     reduction is more prominent than GPU usage reduction.
+
+Deferred Rendering
+  H: Slower than Forward with ≤4 lights (G-Buffer overhead). Clearly faster
+     with ≥16 lights.
+
+Mipmapping
+  H: Higher frame time reduction with high-res textures + many distant objects.
+     Both aliasing reduction AND cache efficiency contribute.
+
+Early-Z Rejection
+  H: Fragment shader invocations drop with high object overlap + Front-to-Back
+     sort. Sorting overhead appears at very high object counts.
+
+UBO Optimization
+  H: Primarily reduces frame time variance (jitter) rather than average FPS.
+     Effect most visible in high draw-call scenes.
+
+--------------------------------------------------------------------------------
+6. HARDWARE TARGET
+--------------------------------------------------------------------------------
+
+  Development GPU : NVIDIA GTX 1660 Ti
+                    (No hardware ray tracing. RT shadows NOT available during dev.)
+                    (Validate all features on this GPU first.)
+
+  Experiment GPU  : NVIDIA RTX 5090
+                    (Used ONLY for final benchmark data collection.)
+                    (Hardware ray tracing available here if RT shadows added.)
+
+  OS  : Windows (assumed, confirm with team)
+  IDE : Visual Studio or VS Code with CMake (confirm with team)
+
+--------------------------------------------------------------------------------
+7. REFERENCE LITERATURE
+--------------------------------------------------------------------------------
+
+  1. "Vulkan all the way: Transitioning to a modern low-level graphics API
+      in Academia" — Unterguggenberger et al. (2023.04)
+
+  2. "Light Performance Comparison between Forward, Deferred and Tile-based
+      Forward Rendering" — Vladislav Polyakov (2020.09)
+
+  3. "Vertex Chunk-Based Object Culling Method for Real-Time Rendering
+      in Metaverse" — Eun-Seok Lee, Byeong-Seok (2023.06.09)
+
+  4. Vulkan 1.4.346 Specification — Khronos Group (2026.03.13)
+
+--------------------------------------------------------------------------------
+8. THEORETICAL BACKGROUND SUMMARY (for code context)
+--------------------------------------------------------------------------------
+
+Rendering Pipeline Stages:
+  Application → Geometry (Vertex Shader: MVP transform) → Rasterization
+  (Fragment Shader: per-pixel color)
+
+  MVP matrices:
+    Model      : object space → world space
+    View       : world space → camera space
+    Projection : camera space → clip space  (clip pos = P × V × M × vertex)
+  After clip: Perspective Divide (x/w, y/w) → NDC → screen pixels
+
+Lighting Models:
+  Blinn-Phong : Ambient + Diffuse (dot(N,L)) + Specular (dot(N,H)^shininess)
+                Low cost, not physically accurate. Good fallback/comparison.
+  PBR         : Cook-Torrance BRDF. Metallic + Roughness params.
+                Fresnel (Schlick approx), Normal Distribution (GGX/Trowbridge),
+                Geometry term (Smith). Physically consistent across lighting.
+
+Shadow Mapping:
+  1. Render from light POV → depth texture (shadow map)
+  2. In camera pass: transform fragment to light space, compare depth
+  3. PCF: sample shadow map neighbors, average → soft edges
+
+Environment Mapping:
+  r = reflect(-V, N)  →  sample CubeMap(r)  →  reflection color
+
+Anti-Aliasing comparison:
+  SSAA  : render at 2× res, downsample. Best quality, very expensive.
+  MSAA  : multi-sample only at triangle edges. Good quality, moderate cost.
+          Incompatible with Deferred Rendering without workarounds.
+  FXAA  : post-process edge blur. Very cheap. Compatible with Deferred.
+          Can blur non-edge texture detail (over-smoothing artifact).
+  TAA   : temporal accumulation across frames. Low cost, high quality.
+          Ghosting artifact on fast motion.
+
+Deferred Rendering G-Buffer layout (typical):
+  RT0 : Albedo (RGB) + unused (A)
+  RT1 : World Normal (RGB) + unused (A)
+  RT2 : World Position (RGB) + unused (A)   [or reconstruct from depth]
+  Depth buffer
+
+--------------------------------------------------------------------------------
+9. PROJECT STRUCTURE SUGGESTION (adapt as needed)
+--------------------------------------------------------------------------------
+
+  VulkanRenderer/
+  ├── CMakeLists.txt
+  ├── PROJECT_CONTEXT.txt          ← THIS FILE
+  ├── src/
+  │   ├── main.cpp
+  │   ├── core/
+  │   │   ├── VulkanContext.h/.cpp     (instance, device, swapchain)
+  │   │   ├── CommandBuffer.h/.cpp
+  │   │   └── Synchronization.h/.cpp
+  │   ├── renderer/
+  │   │   ├── Renderer.h/.cpp          (main render loop)
+  │   │   ├── ForwardPass.h/.cpp
+  │   │   ├── DeferredPass.h/.cpp      (G-Buffer pass + lighting pass)
+  │   │   ├── ShadowPass.h/.cpp
+  │   │   └── PostProcess.h/.cpp       (FXAA if chosen)
+  │   ├── scene/
+  │   │   ├── Scene.h/.cpp
+  │   │   ├── Camera.h/.cpp
+  │   │   ├── Transform.h/.cpp
+  │   │   ├── Mesh.h/.cpp
+  │   │   ├── Material.h/.cpp          (PBR params)
+  │   │   └── Light.h/.cpp
+  │   ├── optimization/
+  │   │   ├── OptimizationFlags.h      (all 8 toggle booleans in one place)
+  │   │   ├── FrustumCulling.h/.cpp
+  │   │   ├── OcclusionCulling.h/.cpp
+  │   │   ├── LOD.h/.cpp
+  │   │   ├── InstancedRendering.h/.cpp
+  │   │   ├── EarlyZ.h/.cpp
+  │   │   └── UBOManager.h/.cpp
+  │   ├── profiling/
+  │   │   ├── TimestampQuery.h/.cpp    (Vulkan GPU timestamps)
+  │   │   └── PerformanceStats.h/.cpp  (FPS, frame time, draw calls, etc.)
+  │   └── utils/
+  │       ├── FileUtils.h/.cpp
+  │       ├── ImageUtils.h/.cpp        (stb_image wrapper)
+  │       └── MeshLoader.h/.cpp        (tinyobjloader / assimp wrapper)
+  ├── shaders/
+  │   ├── forward/
+  │   │   ├── pbr.vert / pbr.frag
+  │   │   └── blinnphong.vert / blinnphong.frag
+  │   ├── deferred/
+  │   │   ├── gbuffer.vert / gbuffer.frag
+  │   │   └── lighting.vert / lighting.frag
+  │   ├── shadow/
+  │   │   └── shadow.vert / shadow.frag
+  │   └── post/
+  │       └── fxaa.frag
+  ├── assets/
+  │   ├── meshes/
+  │   └── textures/
+  └── benchmark/
+      └── results/                     (CSV / JSON output from profiling)
+
+--------------------------------------------------------------------------------
+10. CODING CONVENTIONS & EXPECTATIONS
+--------------------------------------------------------------------------------
+
+- C++17 minimum (structured bindings, std::optional, if-constexpr, etc.)
+- RAII for all Vulkan handles (use vk::UniqueHandle or manual destructors)
+- Validation layers MUST be on in Debug builds
+- Shader compilation: glslc (from Vulkan SDK) → SPIR-V .spv files
+- All 8 optimization flags live in a single OptimizationFlags struct so
+  experiments can be configured from one place
+- Performance stats should be exportable (CSV at minimum) for graph generation
+- Keep Forward and Deferred pipelines switchable at runtime (for comparison)
+
+--------------------------------------------------------------------------------
+11. WHAT THIS PROJECT IS NOT
+--------------------------------------------------------------------------------
+
+- NOT a game engine (no entity-component system required, keep it simple)
+- NOT a production renderer (correctness + measurability > feature completeness)
+- NOT using any high-level graphics framework (no OpenGL, no DirectX, no Metal)
+- NOT C# / .NET anymore (see §1)
+
+================================================================================
+END OF FILE
+================================================================================

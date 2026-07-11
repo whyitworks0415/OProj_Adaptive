@@ -1,0 +1,64 @@
+# Blender 3.6.19 MTL File: 'Inferno_World_free.blend'
+# www.blender.org
+
+newmtl Bone
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 2
+map_Kd C:/2.png
+map_Bump -bm 1.000000 C:/1_normal.png
+
+newmtl Coin
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.435673 0.435673 0.435673
+Ni 1.450000
+d 1.000000
+illum 2
+map_Kd C:/Coin_color.png
+map_Ke C:/Coin_color.png
+map_Bump -bm 1.000000 C:/Coin_normal.png
+
+newmtl Color
+Ns 62.500000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 2
+map_Kd C:/Textures_4.png
+
+newmtl Emission
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ni 1.450000
+d 1.000000
+illum 2
+map_Kd C:/Textures_4.png
+map_Ke C:/Textures_4.png
+
+newmtl Lava
+Ns 1000.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 1
+map_Kd C:/Lava.png
+map_Ke C:/Lava.png
+
+newmtl Metall
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.429252 0.429252 0.429252
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 3
+map_Kd C:/Textures_4.png
